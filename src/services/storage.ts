@@ -1,0 +1,74 @@
+// Browser storage for settings and a local copy of the edits. Every access is
+// guarded, because storage can be unavailable (private windows, blocked site data).
+
+import type { Edits } from '../model/contentModel';
+import { DEFAULT_AI_MODEL } from '../model/aiModel';
+import { parseEdits, serializeEdits } from '../model/syncModel';
+
+export interface Settings {
+  userName: string;
+  ghOwner: string;
+  ghRepo: string;
+  ghBranch: string;
+  ghToken: string;
+  aiKey: string;
+  aiModel: string;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  userName: '',
+  ghOwner: '',
+  ghRepo: '',
+  ghBranch: 'edits',
+  ghToken: '',
+  aiKey: '',
+  aiModel: DEFAULT_AI_MODEL,
+};
+
+const SETTINGS_KEY = 'mest-text-editor:settings';
+const EDITS_KEY = 'mest-text-editor:edits';
+
+export function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) } : DEFAULT_SETTINGS;
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function saveSettings(settings: Settings): void {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // storage unavailable: settings last for this visit only
+  }
+}
+
+export function loadLocalEdits(): Edits {
+  try {
+    return parseEdits(localStorage.getItem(EDITS_KEY) ?? '');
+  } catch {
+    return {};
+  }
+}
+
+export function saveLocalEdits(edits: Edits): void {
+  try {
+    localStorage.setItem(EDITS_KEY, serializeEdits(edits, new Date().toISOString()));
+  } catch {
+    // storage unavailable or full
+  }
+}
+
+export function downloadText(filename: string, text: string, mime: string): void {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
