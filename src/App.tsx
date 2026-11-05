@@ -69,7 +69,7 @@ export function App() {
   const [client, setClient] = useState<SupabaseClient | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [view, setView] = useState<View>('edit');
+  const [view, setView] = useState<View>('wizard');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<NavTab>('pages');
   const [filter, setFilter] = useState<BlockFilter>('all');

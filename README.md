@@ -44,7 +44,7 @@ Use Export, "Backup of all edits" and "Import edits" as a safety copy.
 ## Views
 
 - **Edit**: the sidebar follows the site menu. The Not reviewed / Reviewed filter above it narrows the tree, and a tick marks reviewed pages.
-- **Wizard**: one page at a time with "Fyrru síðu" and "Næstu síðu", a progress bar (reviewed, left), and links to the Faroese and English originals. "Only not reviewed" keeps the round to what is left. Mark a page as reviewed on the page itself.
+- **Wizard** (the start view): one page at a time with "Fyrru síðu" and "Næstu síðu", a progress bar (reviewed, left), and links to the Faroese and English originals. "Only not reviewed" keeps the round to what is left. Mark a page as reviewed on the page itself.
 - **Overview**: every page or news item with its status. Filter on reviewed or not, and on "Open changes" (changed texts not yet ticked "In WordPress"). A reviewed page can be set back to not reviewed here or on the page.
 
 ## AI helper
