@@ -38,8 +38,8 @@ export function PageView({ page, title, crumbs, edits, contentBlocks, seoBlocks,
         <ReviewedButton reviewed={reviewed} onToggle={onToggleReviewed} />
       </div>
       <div className="columns-head" aria-hidden="true">
-        <span>Føroyskt</span>
-        <span>English</span>
+        <span className="lang-chip lang-fo">FO · Føroyskt</span>
+        <span className="lang-chip lang-en">EN · English</span>
       </div>
       {contentBlocks.slice(0, limit).map(row)}
       {contentBlocks.length > limit && (

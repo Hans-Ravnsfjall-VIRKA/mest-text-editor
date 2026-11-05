@@ -74,7 +74,8 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
     const langChanged = isChanged(block, edit, lang);
     const done = lang === 'fo' ? edit?.doneFo === true : edit?.doneEn === true;
     return (
-      <div className="cell">
+      <div className={`cell cell-${lang}`}>
+        <span className={`lang-chip lang-${lang}`}>{lang === 'fo' ? 'FO · Føroyskt' : 'EN · English'}</span>
         <RichField
           value={value}
           lang={lang}

@@ -13,6 +13,10 @@
   --ok-soft: #e4f4ea;
   --error: #b3261e;
   --error-soft: #fdecea;
+  --fo: #1d5fb8;
+  --fo-soft: #eaf1fb;
+  --en: #8b3a9e;
+  --en-soft: #f6edf8;
   --radius: 8px;
   color-scheme: light dark;
 }
@@ -33,6 +37,10 @@
     --ok-soft: #173424;
     --error: #f2928b;
     --error-soft: #3d1c19;
+    --fo: #7db4f2;
+    --fo-soft: #172a40;
+    --en: #d79ae8;
+    --en-soft: #2f1c36;
   }
 }
 
@@ -908,5 +916,88 @@ button.link {
 @media (max-width: 800px) {
   .overview-row {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Language distinction and calmer chrome */
+.lang-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+.lang-fo {
+  background: var(--fo-soft);
+  color: var(--fo);
+}
+.lang-en {
+  background: var(--en-soft);
+  color: var(--en);
+}
+.cell > .lang-chip {
+  margin-bottom: 4px;
+}
+.cell-fo .rt {
+  background: var(--fo-soft);
+  border-color: transparent;
+  border-left: 3px solid var(--fo);
+}
+.cell-en .rt {
+  background: var(--en-soft);
+  border-color: transparent;
+  border-left: 3px solid var(--en);
+}
+.cell-fo .field.is-changed .rt,
+.cell-en .field.is-changed .rt {
+  background: var(--changed-soft);
+  border-color: var(--changed);
+  border-left-width: 3px;
+}
+.columns-head {
+  text-transform: none;
+}
+.fields {
+  gap: 16px;
+}
+.block {
+  border-color: transparent;
+  border-left-width: 3px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  padding: 10px 14px 14px;
+  margin-bottom: 14px;
+}
+.block-tools .check,
+.block-tools .link {
+  opacity: 0.75;
+}
+.block-tools .check:hover,
+.block-tools .link:hover {
+  opacity: 1;
+}
+.topbar {
+  gap: 10px;
+  padding: 8px 16px;
+}
+.sync {
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+.needs-name {
+  color: var(--changed);
+  border-color: var(--changed);
+}
+.columns-head .lang-chip {
+  justify-self: start;
+  padding: 2px 10px;
+}
+.cell > .lang-chip {
+  display: none;
+}
+@media (max-width: 800px) {
+  .cell > .lang-chip {
+    display: inline-block;
   }
 }

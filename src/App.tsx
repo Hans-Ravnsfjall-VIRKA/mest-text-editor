@@ -304,17 +304,13 @@ export function App() {
         <button type="button" className={`sync sync-${status.state}`} title={status.message || status.email || ''} onClick={onSyncButton}>
           {syncLabel[status.state]}
         </button>
-        <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
+        <button type="button" className={settings.userName ? '' : 'needs-name'} title={settings.userName ? '' : 'Add your name so others can see who changed what'} onClick={() => setShowSettings(true)}>
+          {settings.userName ? 'Settings' : 'Add your name'}
+        </button>
       </header>
 
       {notice && <div className="notice" role="status">{notice}</div>}
       {status.state === 'error' && <div className="notice is-error" role="alert">{status.message}. Your edits are still safe in this browser.</div>}
-      {!settings.userName && (
-        <div className="notice">
-          Add your name in <button type="button" className="link" onClick={() => setShowSettings(true)}>Settings</button> so others can see who changed what.
-        </div>
-      )}
-
       {view === 'edit' && (
         <div className="layout">
           <Sidebar
