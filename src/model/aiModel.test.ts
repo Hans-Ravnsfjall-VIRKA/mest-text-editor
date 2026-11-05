@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiTargetLang, buildAiPrompt, buildAiRequest, DEFAULT_AI_MODEL, parseAiResponse, type AiInput } from './aiModel';
+import { aiResultToHtml, aiTargetLang, buildAiPrompt, buildAiRequest, DEFAULT_AI_MODEL, parseAiResponse, type AiInput } from './aiModel';
 
 const base: AiInput = {
   action: 'translateToEn',
@@ -47,5 +47,11 @@ describe('parseAiResponse', () => {
     expect(() => parseAiResponse({ error: { message: 'invalid x-api-key' } })).toThrow('invalid x-api-key');
     expect(() => parseAiResponse({ content: [] })).toThrow('no text');
     expect(() => parseAiResponse(null)).toThrow();
+  });
+});
+
+describe('aiResultToHtml', () => {
+  it('keeps safe formatting and line breaks only', () => {
+    expect(aiResultToHtml('Línja 1\nLínja 2 <strong>feitt</strong><script>x</script>')).toBe('Línja 1<br>Línja 2 <strong>feitt</strong>x');
   });
 });

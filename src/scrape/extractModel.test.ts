@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
 import {
   assembleSite,
+  datesFromRest,
+  extractMenu,
   englishUrlCandidates,
   extractBlocks,
   extractMenuUrls,
@@ -181,3 +183,75 @@ describe('url helpers', () => {
     expect(uniquifyIds([b, b, b]).map((x) => x.id)).toEqual(['x', 'x-1', 'x-2']);
   });
 });
+
+const MENU_HTML = `<!doctype html><html><head></head><body><header><ul id="ast-hf-menu-1" class="main-header-menu">
+<li><a href="#"><span><svg><path d="M1"></path></svg></span><span>Sjóvinna</span></a>
+  <div><ul><li><a href="#">Sjóvinna Menu</a><div>
+    <div data-element_type="column"><h4>Verkætlanir</h4><ul><li><a href="https://x.fo/mest/nybygging/">Nýbygging</a></li><li><a href="https://x.fo/mest/umbygging/">Umbygging</a></li></ul></div>
+    <div data-element_type="column"><h4>Tænastur</h4><ul><li><a href="https://x.fo/mest/sleipibatar-v/">Sleipibátar</a></li></ul></div>
+  </div></li></ul></div></li>
+<li><a href="#"><span>Fiski</span></a><div>
+  <div data-element_type="column"><h4>Veitingar</h4></div>
+  <div data-element_type="column"><h4>Umstøður</h4></div>
+  <div data-element_type="column"><ul><li><a href="https://x.fo/mest/faldarar/">Faldarar</a></li><li><a href="#">Tómt</a></li></ul></div>
+  <div data-element_type="column"><ul><li><a href="https://x.fo/mest/faldarar/">Faldarar</a></li><li><a href="https://x.fo/mest/video/">Video</a></li></ul></div>
+</div></li>
+<li><a href="#"><span>Størv</span></a><div><div data-element_type="column"><h4>Størv</h4><a href="https://x.fo/mest/leys-storv/">Leys Størv</a></div></div></li>
+<li><a href="https://x.fo/mest/treytir/"><span>Treytir</span></a></li>
+<li><a href="https://x.fo/mest/en/"><img alt="English"></a></li>
+</ul></header></body></html>`;
+
+describe('extractMenu', () => {
+  const menu = extractMenu(doc(MENU_HTML));
+  it('lists top-level items and skips the language switcher', () => {
+    expect(menu.map((m) => m.title)).toEqual(['Sjóvinna', 'Fiski', 'Størv', 'Treytir']);
+    expect(menu[3].url).toBe('https://x.fo/mest/treytir/');
+    expect(menu[0].url).toBeNull();
+  });
+  it('groups links under the heading of their column', () => {
+    expect(menu[0].groups.map((g) => g.title)).toEqual(['Verkætlanir', 'Tænastur']);
+    expect(menu[0].groups[0].links.map((l) => l.title)).toEqual(['Nýbygging', 'Umbygging']);
+  });
+  it('keeps links of heading-less columns together, once, without dead links', () => {
+    expect(menu[1].groups).toEqual([
+      {
+        title: null,
+        links: [
+          { title: 'Faldarar', url: 'https://x.fo/mest/faldarar/' },
+          { title: 'Video', url: 'https://x.fo/mest/video/' },
+        ],
+      },
+    ]);
+  });
+  it('does not repeat the item name as a group heading', () => {
+    expect(menu[2].groups).toEqual([{ title: null, links: [{ title: 'Leys Størv', url: 'https://x.fo/mest/leys-storv/' }] }]);
+  });
+  it('returns nothing without a menu', () => {
+    expect(extractMenu(doc('<!doctype html><html><body></body></html>'))).toEqual([]);
+  });
+});
+
+describe('news dates', () => {
+  it('maps addresses to publish dates', () => {
+    expect(datesFromRest([{ link: 'https://x.fo/mest/a/', date: '2026-07-01T09:55:55' }, { link: 5 }, null as never])).toEqual({
+      'https://x.fo/mest/a': '2026-07-01T09:55:55',
+    });
+    expect(datesFromRest({})).toEqual({});
+  });
+  it('puts menu and dates into the assembled site', () => {
+    const page = {
+      id: 'a',
+      type: 'post',
+      urlFo: 'https://x.fo/mest/a/',
+      urlEn: 'https://x.fo/mest/en/a/',
+      paired: pairBlocks('a', extractBlocks(doc(page_('Hey'))), extractBlocks(doc(page_('Hi')))),
+    };
+    const site = assembleSite('https://x.fo/mest', 't', [page], [], { menu: [{ title: 'M', url: null, groups: [] }], dates: { 'https://x.fo/mest/a': '2026-07-01T09:55:55' } });
+    expect(site.menu).toHaveLength(1);
+    expect(site.pages[1].date).toBe('2026-07-01T09:55:55');
+  });
+});
+
+function page_(text: string): string {
+  return `<!doctype html><html><head></head><body><main><div data-id="x"><h1>${text}</h1></div></main></body></html>`;
+}

@@ -14,7 +14,7 @@ const mk = (id: string): PageDoc => ({
     { id: 'p', kind: 'text', tag: 'p', fo: 'Gamal tekstur', en: 'Old text' },
   ],
 });
-const content: SiteContent = { site: 'https://x.fo', scrapedAt: '', pages: [mk('a'), mk('b')] };
+const content: SiteContent = { site: 'https://x.fo', scrapedAt: '', menu: [], pages: [mk('a'), mk('b')] };
 const stamp = { updatedAt: '2026-11-05T10:00:00.000Z', updatedBy: 'hans' };
 
 describe('changeRows', () => {

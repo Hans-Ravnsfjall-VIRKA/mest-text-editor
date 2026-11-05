@@ -11,6 +11,8 @@ import { dirname } from 'node:path';
 import { parseHTML } from 'linkedom';
 import {
   assembleSite,
+  datesFromRest,
+  extractMenu,
   englishUrlCandidates,
   extractBlocks,
   extractMenuUrls,
@@ -81,6 +83,7 @@ async function main(): Promise<void> {
 
   const results: (ScrapedPage | null)[] = new Array(entries.length).fill(null);
   const menuUrls = new Set<string>();
+  let menu: ReturnType<typeof extractMenu> = [];
   const errors: string[] = [];
   let unmatched = 0;
   let next = 0;
@@ -93,6 +96,7 @@ async function main(): Promise<void> {
       try {
         const foDoc = parse(await getText(entry.url));
         for (const url of extractMenuUrls(foDoc)) menuUrls.add(url);
+        if (menu.length === 0) menu = extractMenu(foDoc);
         const en = await getFirst(englishUrlCandidates(SITE, entry.url, findAlternateUrl(foDoc, 'en')));
         const id = pageIdFromUrl(SITE, entry.url);
         const paired = pairBlocks(id, extractBlocks(foDoc), extractBlocks(parse(en.html)));
@@ -108,7 +112,15 @@ async function main(): Promise<void> {
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
   const scraped = results.filter((r): r is ScrapedPage => r !== null);
-  const content = assembleSite(SITE, new Date().toISOString(), scraped, Array.from(menuUrls));
+  const dates: Record<string, string> = {};
+  for (let page = 1; page <= 20; page++) {
+    const res = await fetch(`${SITE}/wp-json/wp/v2/posts?per_page=100&page=${page}&_fields=link,date`);
+    if (!res.ok) break;
+    const batch: unknown = await res.json();
+    Object.assign(dates, datesFromRest(batch));
+    if (!Array.isArray(batch) || batch.length < 100) break;
+  }
+  const content = assembleSite(SITE, new Date().toISOString(), scraped, Array.from(menuUrls), { menu, dates });
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(content));
 

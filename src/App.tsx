@@ -1,28 +1,56 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BlockRow, type AiJob } from './components/BlockRow';
+import type { AiJob } from './components/BlockRow';
+import { LoginDialog } from './components/LoginDialog';
+import { Overview } from './components/Overview';
+import { PageView } from './components/PageView';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
+import { WizardBar } from './components/WizardBar';
 import {
   applyEdit,
   currentText,
   editKey,
   filterBlocks,
-  listPages,
-  siteProgress,
+  matchCounts,
   tagLabel,
   type Block,
   type BlockFilter,
   type EditPatch,
   type Edits,
-  type PageGroup,
+  type NavTab,
   type SiteContent,
 } from './model/contentModel';
+import { breadcrumbFor, buildNewsNav, buildPagesNav, cleanTitle } from './model/navModel';
 import { buildDictionary, changeRows, toCsv } from './model/exportModel';
-import { detectRepoFromLocation, mergeEdits, parseEdits, serializeEdits } from './model/syncModel';
+import { parseSupabaseConfig } from './model/remoteModel';
+import {
+  firstUnreviewed,
+  isReviewed,
+  orderedPageIds,
+  overviewRows,
+  reviewCounts,
+  setReviewed,
+  stepPage,
+  wizardQueue,
+  mergeReviews,
+  type ChangesFilter,
+  type ReviewFilter,
+  type Reviews,
+} from './model/reviewModel';
+import { mergeEdits, parseEdits, serializeEdits } from './model/syncModel';
 import { runAi } from './services/ai';
-import type { GitHubConfig } from './services/github';
-import { downloadText, loadLocalEdits, loadSettings, saveLocalEdits, saveSettings, type Settings } from './services/storage';
-import { useSync } from './useSync';
+import { downloadText, loadLocalEdits, loadLocalReviews, loadSettings, saveLocalEdits, saveLocalReviews, saveSettings, type Settings } from './services/storage';
+import { makeClient } from './services/supabase';
+import { useRemoteSync } from './useRemoteSync';
+
+type View = 'edit' | 'wizard' | 'overview';
+
+const VIEWS: { value: View; label: string }[] = [
+  { value: 'edit', label: 'Edit' },
+  { value: 'wizard', label: 'Wizard' },
+  { value: 'overview', label: 'Overview' },
+];
 
 const FILTERS: { value: BlockFilter; label: string }[] = [
   { value: 'all', label: 'All texts' },
@@ -32,21 +60,26 @@ const FILTERS: { value: BlockFilter; label: string }[] = [
   { value: 'sameBoth', label: 'Same in both languages' },
 ];
 
-const PAGE_SIZE = 150;
-
 export function App() {
   const [content, setContent] = useState<SiteContent | null>(null);
   const [loadError, setLoadError] = useState('');
   const [edits, setEdits] = useState<Edits>(() => loadLocalEdits());
+  const [reviews, setReviews] = useState<Reviews>(() => loadLocalReviews());
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
+  const [client, setClient] = useState<SupabaseClient | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [view, setView] = useState<View>('edit');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [group, setGroup] = useState<PageGroup>('menu');
+  const [tab, setTab] = useState<NavTab>('pages');
   const [filter, setFilter] = useState<BlockFilter>('all');
   const [query, setQuery] = useState('');
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
+  const [changesFilter, setChangesFilter] = useState<ChangesFilter>('all');
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(true);
   const [notice, setNotice] = useState('');
   const importRef = useRef<HTMLInputElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     fetch('./data/content.json', { cache: 'no-cache' })
@@ -56,46 +89,81 @@ export function App() {
       })
       .then(setContent)
       .catch((err: unknown) => setLoadError(err instanceof Error ? err.message : String(err)));
+    fetch('./data/config.json', { cache: 'no-cache' })
+      .then((res) => (res.ok ? res.text() : ''))
+      .then((text) => {
+        const config = parseSupabaseConfig(text);
+        if (config) setClient(makeClient(config));
+      })
+      .catch(() => undefined);
   }, []);
 
-  useEffect(() => saveLocalEdits(edits), [edits]);
+  useEffect(() => {
+    saveLocalEdits(edits);
+  }, [edits]);
+  useEffect(() => {
+    saveLocalReviews(reviews);
+  }, [reviews]);
 
-  const detected = useMemo(() => detectRepoFromLocation(window.location.hostname, window.location.pathname), []);
-  const ghConfig = useMemo<GitHubConfig | null>(() => {
-    const owner = settings.ghOwner || detected?.owner || '';
-    const repo = settings.ghRepo || detected?.repo || '';
-    if (!settings.ghToken || !owner || !repo) return null;
-    return { owner, repo, branch: settings.ghBranch || 'edits', token: settings.ghToken };
-  }, [settings, detected]);
-
-  const onMerged = useCallback((merged: Edits) => setEdits((local) => mergeEdits(merged, local)), []);
-  const { status, syncNow } = useSync({ config: ghConfig, edits, userName: settings.userName, onMerged });
+  const onMerged = useCallback((remoteEdits: Edits, remoteReviews: Reviews) => {
+    setEdits((local) => mergeEdits(remoteEdits, local));
+    setReviews((local) => mergeReviews(remoteReviews, local));
+  }, []);
+  const { status, syncNow, signIn, signOut } = useRemoteSync({ client, edits, reviews, onMerged });
 
   const userRef = useRef(settings.userName);
   userRef.current = settings.userName;
   const pageRef = useRef<string | null>(null);
 
-  const items = useMemo(
-    () => (content ? listPages(content, edits, group, filter, query) : []),
-    [content, edits, group, filter, query],
-  );
-  const page = useMemo(() => {
-    if (!content) return null;
-    return content.pages.find((p) => p.id === selectedId) ?? items[0]?.page ?? null;
-  }, [content, selectedId, items]);
+  const nav = useMemo(() => (content ? buildPagesNav(content) : null), [content]);
+  const news = useMemo(() => (content ? buildNewsNav(content) : []), [content]);
+  const ids = useMemo(() => (content ? orderedPageIds(content, tab) : []), [content, tab]);
+  const counts = useMemo(() => (content ? reviewCounts(ids, reviews) : { total: 0, reviewed: 0, left: 0 }), [content, ids, reviews]);
+
+  const pageId =
+    selectedId && ids.includes(selectedId) ? selectedId : view === 'wizard' ? firstUnreviewed(ids, reviews) ?? ids[0] ?? null : ids[0] ?? null;
+  const page = useMemo(() => content?.pages.find((p) => p.id === pageId) ?? null, [content, pageId]);
   pageRef.current = page?.id ?? null;
 
+  const narrowed = filter !== 'all' || query.trim() !== '';
+  const textCounts = useMemo(
+    () => (content && narrowed ? matchCounts(content, edits, filter, query) : null),
+    [content, edits, filter, query, narrowed],
+  );
   const blocks = useMemo(() => (page ? filterBlocks(page, edits, filter, query) : []), [page, edits, filter, query]);
-  const total = useMemo(() => (content ? siteProgress(content, edits) : null), [content, edits]);
+  const contentBlocks = blocks.filter((b) => b.kind !== 'meta');
+  const seoBlocks = blocks.filter((b) => b.kind === 'meta');
 
-  useEffect(() => setLimit(PAGE_SIZE), [page?.id, filter, query]);
+  const queue = useMemo(() => wizardQueue(ids, reviews, onlyUnreviewed, pageId), [ids, reviews, onlyUnreviewed, pageId]);
+  const prevId = stepPage(queue, pageId, -1);
+  const nextId = stepPage(queue, pageId, 1);
+
+  const rows = useMemo(
+    () => (content && view === 'overview' ? overviewRows(content, edits, reviews, { tab, review: reviewFilter, changes: changesFilter }) : []),
+    [content, view, edits, reviews, tab, reviewFilter, changesFilter],
+  );
+  const openPages = useMemo(
+    () => (content && view === 'overview' ? overviewRows(content, edits, reviews, { tab, review: reviewFilter, changes: 'open' }).length : 0),
+    [content, view, edits, reviews, tab, reviewFilter],
+  );
+
+  // Pin a fallback page so it does not jump away when review state changes.
+  useEffect(() => {
+    if (pageId && selectedId !== pageId) setSelectedId(pageId);
+  }, [pageId, selectedId]);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [page?.id, view]);
+
+  const toggleReviewed = useCallback((id: string, value: boolean) => {
+    setReviews((current) => setReviewed(current, id, value, userRef.current || 'unknown', new Date().toISOString()));
+  }, []);
 
   const onPatch = useCallback((block: Block, patch: EditPatch) => {
-    const pageId = pageRef.current;
-    if (!pageId) return;
-    setEdits((current) =>
-      applyEdit(current, block, editKey(pageId, block.id), patch, userRef.current || 'unknown', new Date().toISOString()),
-    );
+    const id = pageRef.current;
+    if (!id) return;
+    setEdits((current) => applyEdit(current, block, editKey(id, block.id), patch, userRef.current || 'unknown', new Date().toISOString()));
   }, []);
 
   const editsRef = useRef(edits);
@@ -127,9 +195,9 @@ export function App() {
 
   const exportCsv = (): void => {
     if (!content) return;
-    const rows = changeRows(content, edits);
-    if (rows.length === 0) return flash('Nothing has been changed yet.');
-    downloadText('mest-text-changes.csv', `﻿${toCsv(rows)}`, 'text/csv');
+    const changed = changeRows(content, edits);
+    if (changed.length === 0) return flash('Nothing has been changed yet.');
+    downloadText('mest-text-changes.csv', `﻿${toCsv(changed)}`, 'text/csv');
   };
   const exportDictionary = (): void => {
     if (!content) return;
@@ -150,42 +218,70 @@ export function App() {
     flash(`Imported ${count} edits. The newest version of each text was kept.`);
   };
 
-  if (loadError) return <p className="state">Could not load the site texts ({loadError}).</p>;
-  if (!content) return <p className="state">Loading texts…</p>;
+  const openPage = (id: string): void => {
+    setSelectedId(id);
+    setView('edit');
+  };
 
-  const narrowed = filter !== 'all' || query.trim() !== '';
+  if (loadError) return <p className="state">Could not load the site texts ({loadError}).</p>;
+  if (!content || !nav) return <p className="state">Loading texts…</p>;
+
   const syncLabel: Record<typeof status.state, string> = {
     off: 'Saved in this browser only',
+    signedOut: 'Sign in to save online',
     idle: 'Connecting…',
     syncing: 'Saving…',
-    saved: status.lastSync ? `Saved ${new Date(status.lastSync).toLocaleTimeString()}` : 'Saved',
-    error: 'Could not save to GitHub',
+    saved: status.lastSync ? `Saved online ${new Date(status.lastSync).toLocaleTimeString()}` : 'Saved online',
+    error: 'Could not save online',
   };
+  const onSyncButton = (): void => {
+    if (status.state === 'off') return flash('No online database is set up yet. Edits are kept in this browser.');
+    setShowLogin(true);
+  };
+
+  const pageTitle = page ? cleanTitle(page.title) : '';
+  const crumbs = page && tab === 'pages' ? breadcrumbFor(nav, page.id) : [];
+  const pageBody = page && (
+    <PageView
+      key={page.id}
+      page={page}
+      title={pageTitle}
+      crumbs={crumbs}
+      edits={edits}
+      contentBlocks={contentBlocks}
+      seoBlocks={seoBlocks}
+      narrowed={narrowed}
+      aiEnabled={settings.aiKey !== ''}
+      reviewed={isReviewed(reviews, page.id)}
+      onToggleReviewed={() => toggleReviewed(page.id, !isReviewed(reviews, page.id))}
+      onPatch={onPatch}
+      onAi={onAi}
+    />
+  );
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
           <strong>MEST</strong> text editor
-          {total && (
-            <span className="totals">
-              {total.changed} changed, {total.approved} approved, {total.toReplace} to put in WordPress
-            </span>
-          )}
         </div>
-        <input
-          type="search"
-          className="search"
-          placeholder="Search all texts"
-          aria-label="Search all texts"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <select aria-label="Filter texts" value={filter} onChange={(e) => setFilter(e.target.value as BlockFilter)}>
-          {FILTERS.map((f) => (
-            <option key={f.value} value={f.value}>{f.label}</option>
+        <div className="seg views" role="tablist" aria-label="View">
+          {VIEWS.map((v) => (
+            <button key={v.value} type="button" role="tab" aria-selected={view === v.value} className={view === v.value ? 'is-active' : ''} onClick={() => setView(v.value)}>
+              {v.label}
+            </button>
           ))}
-        </select>
+        </div>
+        {view !== 'overview' && (
+          <>
+            <input type="search" className="search" placeholder="Search all texts" aria-label="Search all texts" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <select aria-label="Filter texts" value={filter} onChange={(e) => setFilter(e.target.value as BlockFilter)}>
+              {FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+          </>
+        )}
         <details className="menu">
           <summary>Export</summary>
           <div className="menu-items">
@@ -205,12 +301,7 @@ export function App() {
             e.target.value = '';
           }}
         />
-        <button
-          type="button"
-          className={`sync sync-${status.state}`}
-          title={status.message || 'Sync now'}
-          onClick={status.state === 'off' ? () => setShowSettings(true) : syncNow}
-        >
+        <button type="button" className={`sync sync-${status.state}`} title={status.message || status.email || ''} onClick={onSyncButton}>
           {syncLabel[status.state]}
         </button>
         <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
@@ -224,57 +315,71 @@ export function App() {
         </div>
       )}
 
-      <div className="layout">
-        <Sidebar
-          items={items}
-          selectedId={page?.id ?? null}
-          group={group}
-          narrowed={narrowed}
-          onGroup={setGroup}
-          onSelect={setSelectedId}
-        />
-        <main className="main">
-          {page ? (
-            <>
-              <div className="page-head">
-                <h1>{page.title}</h1>
-                <p>
-                  <a href={page.urlFo} target="_blank" rel="noreferrer">Faroese page</a>
-                  <a href={page.urlEn} target="_blank" rel="noreferrer">English page</a>
-                  <span>{blocks.length} of {page.blocks.length} texts</span>
-                </p>
-              </div>
-              <div className="columns-head" aria-hidden="true">
-                <span>Føroyskt</span>
-                <span>English</span>
-              </div>
-              {blocks.slice(0, limit).map((block) => (
-                <BlockRow
-                  key={`${page.id}/${block.id}`}
-                  block={block}
-                  edit={edits[editKey(page.id, block.id)]}
-                  aiEnabled={settings.aiKey !== ''}
-                  onPatch={onPatch}
-                  onAi={onAi}
-                />
-              ))}
-              {blocks.length > limit && (
-                <button type="button" className="more" onClick={() => setLimit(limit + PAGE_SIZE)}>
-                  Show {Math.min(PAGE_SIZE, blocks.length - limit)} more
-                </button>
-              )}
-              {blocks.length === 0 && <p className="state">No texts match on this page.</p>}
-            </>
-          ) : (
-            <p className="state">No pages match.</p>
-          )}
-        </main>
-      </div>
+      {view === 'edit' && (
+        <div className="layout">
+          <Sidebar
+            tab={tab}
+            onTab={setTab}
+            nav={nav}
+            news={news}
+            counts={textCounts}
+            reviews={reviews}
+            reviewFilter={reviewFilter}
+            onReviewFilter={setReviewFilter}
+            reviewCounts={counts}
+            selectedId={page?.id ?? null}
+            onSelect={setSelectedId}
+          />
+          <main className="main" ref={mainRef}>
+            {pageBody || <p className="state">No pages match.</p>}
+          </main>
+        </div>
+      )}
+
+      {view === 'wizard' && (
+        <div className="layout is-single">
+          <main className="main" ref={mainRef}>
+            <WizardBar
+              tab={tab}
+              onTab={setTab}
+              counts={counts}
+              onlyUnreviewed={onlyUnreviewed}
+              onOnlyUnreviewed={setOnlyUnreviewed}
+              position={Math.max(1, queue.indexOf(pageId ?? '') + 1)}
+              queueLength={queue.length}
+              hasPrev={prevId !== null}
+              hasNext={nextId !== null}
+              onPrev={() => prevId && setSelectedId(prevId)}
+              onNext={() => nextId && setSelectedId(nextId)}
+            />
+            {pageBody || <p className="state">No pages to review.</p>}
+          </main>
+        </div>
+      )}
+
+      {view === 'overview' && (
+        <div className="layout is-single">
+          <main className="main" ref={mainRef}>
+            <Overview
+              tab={tab}
+              onTab={setTab}
+              review={reviewFilter}
+              onReview={setReviewFilter}
+              changes={changesFilter}
+              onChanges={setChangesFilter}
+              counts={counts}
+              rows={rows}
+              openPages={openPages}
+              onOpen={openPage}
+              onToggleReviewed={toggleReviewed}
+            />
+          </main>
+        </div>
+      )}
 
       {showSettings && (
         <SettingsDialog
           settings={settings}
-          detectedRepo={detected ? `${detected.owner}/${detected.repo}` : ''}
           onClose={() => setShowSettings(false)}
           onSave={(next) => {
             setSettings(next);
@@ -283,6 +388,7 @@ export function App() {
           }}
         />
       )}
+      {showLogin && <LoginDialog email={status.email} onSignIn={signIn} onSignOut={signOut} onSyncNow={syncNow} onClose={() => setShowLogin(false)} />}
     </div>
   );
 }

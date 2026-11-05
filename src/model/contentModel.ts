@@ -1,6 +1,7 @@
 // Pure logic for content, edits, filtering and progress. No DOM, no network.
 
 import type { Block, PageDoc, SiteContent } from '../scrape/extractModel';
+import { richToPlain } from './richTextModel';
 
 export type { Block, PageDoc, SiteContent };
 
@@ -20,7 +21,7 @@ export interface BlockEdit {
 export type Edits = Record<string, BlockEdit>;
 
 export type BlockFilter = 'all' | 'changed' | 'approved' | 'toReplace' | 'sameBoth';
-export type PageGroup = 'all' | 'menu' | 'page' | 'post' | 'other';
+export type NavTab = 'pages' | 'news';
 
 export interface EditPatch {
   fo?: string;
@@ -49,18 +50,6 @@ export function isChanged(block: Block, edit: BlockEdit | undefined, lang?: Lang
 export function needsReplace(block: Block, edit: BlockEdit | undefined): boolean {
   if (!edit) return false;
   return (isChanged(block, edit, 'fo') && !edit.doneFo) || (isChanged(block, edit, 'en') && !edit.doneEn);
-}
-
-/** Stored text uses <br> and HTML entities; the editor shows line breaks and plain ampersands. */
-export function htmlToEditable(html: string): string {
-  return html.replace(/<br>/g, '\n').replace(/&amp;/g, '&');
-}
-
-export function editableToHtml(text: string): string {
-  return text
-    .replace(/&(?!(?:lt|gt|quot|amp);)/g, '&amp;')
-    .replace(/\r\n?/g, '\n')
-    .replace(/\n/g, '<br>');
 }
 
 /** Apply a patch to one block's edit. Text equal to the original clears that field. */
@@ -96,7 +85,17 @@ export function applyEdit(
 }
 
 function plain(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').toLowerCase();
+  return richToPlain(html).toLowerCase();
+}
+
+/** Texts shown in the editor. Image alt texts and similar attributes are left as they are. */
+export function editorBlocks(page: PageDoc): Block[] {
+  return page.blocks.filter((block) => block.kind !== 'attr');
+}
+
+/** Only pages and news are edited for now. */
+export function editorPages(content: SiteContent): PageDoc[] {
+  return content.pages.filter((p) => p.type === 'page' || p.type === 'post');
 }
 
 export function matchesQuery(block: Block, edit: BlockEdit | undefined, query: string): boolean {
@@ -126,7 +125,7 @@ export function matchesFilter(block: Block, edit: BlockEdit | undefined, filter:
 }
 
 export function filterBlocks(page: PageDoc, edits: Edits, filter: BlockFilter, query: string): Block[] {
-  return page.blocks.filter((block) => {
+  return editorBlocks(page).filter((block) => {
     const edit = edits[editKey(page.id, block.id)];
     return matchesFilter(block, edit, filter) && matchesQuery(block, edit, query);
   });
@@ -140,8 +139,9 @@ export interface Progress {
 }
 
 export function pageProgress(page: PageDoc, edits: Edits): Progress {
-  const progress: Progress = { total: page.blocks.length, changed: 0, approved: 0, toReplace: 0 };
-  for (const block of page.blocks) {
+  const blocks = editorBlocks(page);
+  const progress: Progress = { total: blocks.length, changed: 0, approved: 0, toReplace: 0 };
+  for (const block of blocks) {
     const edit = edits[editKey(page.id, block.id)];
     if (isChanged(block, edit)) progress.changed++;
     if (edit?.approved) progress.approved++;
@@ -151,7 +151,7 @@ export function pageProgress(page: PageDoc, edits: Edits): Progress {
 }
 
 export function siteProgress(content: SiteContent, edits: Edits): Progress {
-  return content.pages.reduce<Progress>(
+  return editorPages(content).reduce<Progress>(
     (sum, page) => {
       const p = pageProgress(page, edits);
       return {
@@ -165,20 +165,8 @@ export function siteProgress(content: SiteContent, edits: Edits): Progress {
   );
 }
 
-export function pageInGroup(page: PageDoc, group: PageGroup): boolean {
-  if (page.type === 'global') return true;
-  switch (group) {
-    case 'all':
-      return true;
-    case 'menu':
-      return page.inMenu;
-    case 'page':
-      return page.type === 'page';
-    case 'post':
-      return page.type === 'post';
-    case 'other':
-      return page.type !== 'page' && page.type !== 'post';
-  }
+export function pageInTab(page: PageDoc, tab: NavTab): boolean {
+  return page.type === (tab === 'pages' ? 'page' : 'post');
 }
 
 export interface PageListItem {
@@ -187,25 +175,34 @@ export interface PageListItem {
   progress: Progress;
 }
 
-/** Pages for the sidebar: global texts first, then menu pages, then the rest, each sorted by title. */
+/** Flat result list for the sidebar while a search or filter is active. */
 export function listPages(
   content: SiteContent,
   edits: Edits,
-  group: PageGroup,
+  tab: NavTab,
   filter: BlockFilter,
   query: string,
 ): PageListItem[] {
-  const narrowed = filter !== 'all' || query.trim() !== '';
-  const rank = (p: PageDoc): number => (p.type === 'global' ? 0 : p.inMenu ? 1 : 2);
   return content.pages
-    .filter((page) => pageInGroup(page, group))
+    .filter((page) => pageInTab(page, tab))
     .map((page) => ({
       page,
       matches: filterBlocks(page, edits, filter, query).length,
       progress: pageProgress(page, edits),
     }))
-    .filter((item) => !narrowed || item.matches > 0)
-    .sort((a, b) => rank(a.page) - rank(b.page) || a.page.title.localeCompare(b.page.title, 'fo'));
+    .filter((item) => item.matches > 0)
+    .sort((a, b) =>
+      tab === 'news'
+        ? (b.page.date ?? '').localeCompare(a.page.date ?? '') || a.page.title.localeCompare(b.page.title, 'fo')
+        : a.page.title.localeCompare(b.page.title, 'fo'),
+    );
+}
+
+/** Match counts per page for the current search and filter, used to mark the menu. */
+export function matchCounts(content: SiteContent, edits: Edits, filter: BlockFilter, query: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const page of editorPages(content)) counts.set(page.id, filterBlocks(page, edits, filter, query).length);
+  return counts;
 }
 
 export function tagLabel(block: Block): string {
@@ -213,7 +210,7 @@ export function tagLabel(block: Block): string {
   if (block.kind === 'attr') return block.tag === 'img' ? 'Image alt' : 'Form field';
   const labels: Record<string, string> = {
     h1: 'H1', h2: 'H2', h3: 'H3', h4: 'H4', h5: 'H5', h6: 'H6',
-    p: 'Text', li: 'List item', a: 'Link', button: 'Button', span: 'Label', div: 'Text',
+    p: 'Text', b: 'Text', strong: 'Text', em: 'Text', li: 'List item', a: 'Link', button: 'Button', span: 'Label', div: 'Text',
     td: 'Table cell', th: 'Table head', label: 'Label', figcaption: 'Caption',
   };
   return labels[block.tag] ?? block.tag;

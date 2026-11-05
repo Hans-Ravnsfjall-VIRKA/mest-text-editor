@@ -3,8 +3,10 @@
 Internal tool for rewriting the texts on https://mest-fo.com/mest/ in Faroese and English, side by side, before they go back into WordPress (Elementor + TranslatePress).
 
 - `public/data/content.json` holds every text scraped from the site, paired Faroese / English.
+- Only pages and news are edited for now. Image alt texts are left as they are; bold, italic and links show formatted, as on the site.
+- Navigation follows the website: the Pages tab mirrors the site menu (sections, dropdown groups, then "Other pages"), the News tab lists posts newest first with date (dd-mm-yyyy). Search and the filter switch the sidebar to a flat result list.
 - The app is static (Vite + React + TypeScript) and runs on GitHub Pages.
-- Edits are saved in the browser and, with a GitHub token, to `data/edits.json` on the `edits` branch so everyone works on the same text.
+- Edits and reviews are saved in the browser and, once signed in, to Supabase so everyone works on the same text.
 
 ## Run locally
 
@@ -21,19 +23,29 @@ npm run build    # production build in dist/
 2. Repository Settings, Pages: set Source to "GitHub Actions".
 3. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes on every push to `main`.
 
-A GitHub Pages site is reachable by anyone who has the address, also when the repository itself is private (private Pages needs GitHub Enterprise Cloud). The page is marked `noindex`. With a public repository the `edits` branch, and so the unpublished texts, are public too.
+A GitHub Pages site is reachable by anyone who has the address, also when the repository itself is private (private Pages needs GitHub Enterprise Cloud). The page is marked `noindex`.
 
-## Shared saving
+## Shared saving (Supabase)
 
-Open Settings in the app and fill in:
+Edits and page reviews are saved in a Supabase database so everyone sees the same state. Without it the app still works and keeps everything in the browser.
 
-- **Your name**: shown next to each edit.
-- **Access token**: a fine-grained GitHub token limited to this repository with "Contents: read and write". Each person uses their own.
-- Owner and repository are detected automatically on GitHub Pages.
+One-time setup:
 
-The app creates the `edits` branch on first save. Saving there does not trigger a rebuild. When two people edit at once, the newest version of each text wins, block by block.
+1. Create a Supabase project.
+2. Open the SQL editor and run `supabase/schema.sql`.
+3. Authentication, Providers: keep Email on, turn off "Allow new users to sign up". Add each team member under Authentication, Users (email and password).
+4. Put the project URL and the anon (public) key in `public/data/config.json` (Project Settings, API). The anon key is meant to be public: the tables only answer to signed-in users.
+5. Commit and push. Pages redeploys.
 
-Without a token the edits stay in the browser. Use Export, "Backup of all edits" and "Import edits" to move them between people.
+Each person then opens the app, presses "Sign in to save online" and signs in. Changes are pushed a moment after each edit and pulled every 30 seconds. When two people change the same text or page, the newest change wins. Nothing is deleted: a revert or "not reviewed" is stored as a newer row.
+
+Use Export, "Backup of all edits" and "Import edits" as a safety copy.
+
+## Views
+
+- **Edit**: the sidebar follows the site menu. The Not reviewed / Reviewed filter above it narrows the tree, and a tick marks reviewed pages.
+- **Wizard**: one page at a time with "Fyrru síðu" and "Næstu síðu", a progress bar (reviewed, left), and links to the Faroese and English originals. "Only not reviewed" keeps the round to what is left. Mark a page as reviewed on the page itself.
+- **Overview**: every page or news item with its status. Filter on reviewed or not, and on "Open changes" (changed texts not yet ticked "In WordPress"). A reviewed page can be set back to not reviewed here or on the page.
 
 ## AI helper
 
@@ -76,6 +88,8 @@ npm run scrape -- --types=page,post --limit=20
 ```bash
 npm run build:console-scraper
 ```
+
+The scrape also captures the site menu and news dates, which drive the navigation.
 
 Open https://mest-fo.com/mest/ in Chrome, open DevTools, Console, paste the content of `scripts/console-scraper.js` and press Enter. After a few minutes `content.json` downloads. Move it to `public/data/content.json`, commit and push. Progress: type `__mestScrape.done` in the console.
 

@@ -30,12 +30,33 @@ export interface PageDoc {
   urlEn: string;
   /** True when the page is linked from the site header or menus. */
   inMenu: boolean;
+  /** Publish date (ISO), known for news posts. */
+  date?: string;
   blocks: Block[];
+}
+
+export interface MenuLink {
+  title: string;
+  url: string;
+}
+
+export interface MenuGroup {
+  /** Heading above the links in the dropdown, or null when the links have none. */
+  title: string | null;
+  links: MenuLink[];
+}
+
+export interface MenuItem {
+  title: string;
+  /** Own address when the item itself is a link (not just a dropdown). */
+  url: string | null;
+  groups: MenuGroup[];
 }
 
 export interface SiteContent {
   site: string;
   scrapedAt: string;
+  menu: MenuItem[];
   pages: PageDoc[];
 }
 
@@ -372,13 +393,21 @@ function pageTitle(blocks: Block[], fallback: string): string {
 }
 
 /** Combine scraped pages into one dataset; header, footer and menu texts are collected once. */
+export interface SiteExtras {
+  menu?: MenuItem[];
+  /** Publish dates by page address (see datesFromRest). */
+  dates?: Record<string, string>;
+}
+
 export function assembleSite(
   site: string,
   scrapedAt: string,
   scraped: ScrapedPage[],
   menuUrls: string[] = [],
+  extras: SiteExtras = {},
 ): SiteContent {
   const menu = new Set(menuUrls.map(normalizeUrl));
+  const dates = extras.dates ?? {};
   const globalSeen = new Set<string>();
   const globalBlocks: Block[] = [];
   const pages: PageDoc[] = [];
@@ -398,6 +427,7 @@ export function assembleSite(
       urlFo: page.urlFo,
       urlEn: page.urlEn,
       inMenu: menu.has(normalizeUrl(page.urlFo)),
+      ...(dates[normalizeUrl(page.urlFo)] ? { date: dates[normalizeUrl(page.urlFo)] } : {}),
       blocks,
     });
   }
@@ -411,7 +441,7 @@ export function assembleSite(
     inMenu: true,
     blocks: uniquifyIds(globalBlocks),
   };
-  return { site, scrapedAt, pages: [globalPage, ...pages] };
+  return { site, scrapedAt, menu: extras.menu ?? [], pages: [globalPage, ...pages] };
 }
 
 export function normalizeUrl(url: string): string {
@@ -423,6 +453,75 @@ export function extractMenuUrls(doc: Document): string[] {
   const links = Array.from(doc.querySelectorAll('header a[href], nav a[href], .mobmenu-panel a[href]'));
   const urls = links.map((a) => a.getAttribute('href') ?? '').filter((h) => /^https?:/.test(h));
   return Array.from(new Set(urls.map(normalizeUrl)));
+}
+
+function linkOf(a: Element): MenuLink | null {
+  const href = a.getAttribute('href') ?? '';
+  const title = collapseWhitespace(a.textContent ?? '').trim();
+  if (!/^https?:/.test(href) || title === '' || /\/en\/?$/.test(href)) return null;
+  return { title, url: href };
+}
+
+function pushLink(group: MenuGroup, link: MenuLink): void {
+  if (!group.links.some((l) => l.url === link.url)) group.links.push(link);
+}
+
+/**
+ * The main menu as the site shows it: top-level items and, for dropdowns, the
+ * linked pages grouped under the headings of the mega menu. Links in columns
+ * without a heading of their own are kept together in one group without title,
+ * because the markup does not say which heading they belong to.
+ */
+export function extractMenu(doc: Document): MenuItem[] {
+  const root = doc.querySelector('#ast-hf-menu-1') ?? doc.querySelector('header ul.main-header-menu');
+  if (!root) return [];
+  const items: MenuItem[] = [];
+  for (const li of Array.from(root.children)) {
+    if (li.tagName.toUpperCase() !== 'LI') continue;
+    const top = Array.from(li.children).find((c) => c.tagName.toUpperCase() === 'A');
+    const title = collapseWhitespace(top?.textContent ?? '').trim();
+    if (!top || title === '') continue;
+    const own = linkOf(top);
+    const loose: MenuGroup = { title: null, links: [] };
+    const titled: MenuGroup[] = [];
+    const columns = Array.from(li.querySelectorAll('[data-element_type="column"]')).filter(
+      (c) => !c.parentElement?.closest('[data-element_type="column"]'),
+    );
+    if (columns.length === 0) {
+      for (const a of Array.from(li.querySelectorAll('ul a[href]'))) {
+        const link = linkOf(a);
+        if (link) pushLink(loose, link);
+      }
+    }
+    for (const column of columns) {
+      let current: MenuGroup | null = null;
+      for (const el of Array.from(column.querySelectorAll('h1,h2,h3,h4,h5,h6,a[href]'))) {
+        if (/^H[1-6]$/i.test(el.tagName)) {
+          const heading = collapseWhitespace(el.textContent ?? '').trim();
+          current = heading && heading.toLowerCase() !== title.toLowerCase() ? { title: heading, links: [] } : null;
+          if (current) titled.push(current);
+          continue;
+        }
+        const link = linkOf(el);
+        if (link) pushLink(current ?? loose, link);
+      }
+    }
+    const groups = [...titled.filter((g) => g.links.length > 0), ...(loose.links.length > 0 ? [loose] : [])];
+    items.push({ title, url: own?.url ?? null, groups });
+  }
+  return items;
+}
+
+/** Publish dates by address from a WordPress REST list ("link" and "date" fields). */
+export function datesFromRest(items: unknown): Record<string, string> {
+  const dates: Record<string, string> = {};
+  if (!Array.isArray(items)) return dates;
+  for (const item of items) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { link, date } = item as { link?: unknown; date?: unknown };
+    if (typeof link === 'string' && typeof date === 'string') dates[normalizeUrl(link)] = date;
+  }
+  return dates;
 }
 
 /** Page id from its URL path relative to the site root, e.g. "samband" or "burdardygd/samfelagsabyrgd". */

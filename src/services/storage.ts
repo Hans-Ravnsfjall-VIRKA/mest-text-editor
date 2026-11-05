@@ -3,30 +3,24 @@
 
 import type { Edits } from '../model/contentModel';
 import { DEFAULT_AI_MODEL } from '../model/aiModel';
+import { parseReviews, type Reviews } from '../model/reviewModel';
 import { parseEdits, serializeEdits } from '../model/syncModel';
 
 export interface Settings {
   userName: string;
-  ghOwner: string;
-  ghRepo: string;
-  ghBranch: string;
-  ghToken: string;
   aiKey: string;
   aiModel: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   userName: '',
-  ghOwner: '',
-  ghRepo: '',
-  ghBranch: 'edits',
-  ghToken: '',
   aiKey: '',
   aiModel: DEFAULT_AI_MODEL,
 };
 
 const SETTINGS_KEY = 'mest-text-editor:settings';
 const EDITS_KEY = 'mest-text-editor:edits';
+const REVIEWS_KEY = 'mest-text-editor:reviews';
 
 export function loadSettings(): Settings {
   try {
@@ -56,6 +50,22 @@ export function loadLocalEdits(): Edits {
 export function saveLocalEdits(edits: Edits): void {
   try {
     localStorage.setItem(EDITS_KEY, serializeEdits(edits, new Date().toISOString()));
+  } catch {
+    // storage unavailable or full
+  }
+}
+
+export function loadLocalReviews(): Reviews {
+  try {
+    return parseReviews(localStorage.getItem(REVIEWS_KEY) ?? '');
+  } catch {
+    return {};
+  }
+}
+
+export function saveLocalReviews(reviews: Reviews): void {
+  try {
+    localStorage.setItem(REVIEWS_KEY, JSON.stringify(reviews));
   } catch {
     // storage unavailable or full
   }

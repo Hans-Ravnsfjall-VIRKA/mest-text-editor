@@ -1,16 +1,8 @@
 import { memo, useState } from 'react';
-import {
-  currentText,
-  editableToHtml,
-  htmlToEditable,
-  isChanged,
-  tagLabel,
-  type Block,
-  type BlockEdit,
-  type EditPatch,
-  type Lang,
-} from '../model/contentModel';
-import { AI_ACTIONS, aiTargetLang, type AiAction } from '../model/aiModel';
+import { currentText, isChanged, tagLabel, type Block, type BlockEdit, type EditPatch, type Lang } from '../model/contentModel';
+import { AI_ACTIONS, aiResultToHtml, aiTargetLang, type AiAction } from '../model/aiModel';
+import { richToPlain, sanitizeRichHtml } from '../model/richTextModel';
+import { RichField } from './RichField';
 
 export interface AiJob {
   action: AiAction;
@@ -28,25 +20,30 @@ interface Props {
 
 interface Suggestion {
   lang: Lang;
-  text: string;
+  html: string;
 }
 
 const LANG_LABEL: Record<Lang, string> = { fo: 'Føroyskt', en: 'English' };
 
-function rowsFor(text: string): number {
-  const lines = text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 58)), 0);
-  return Math.min(Math.max(lines, 1), 18);
-}
-
-async function copy(text: string): Promise<void> {
+async function copyRich(html: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([richToPlain(html)], { type: 'text/plain' }),
+      }),
+    ]);
   } catch {
-    // clipboard blocked: nothing else to do
+    try {
+      await navigator.clipboard.writeText(html);
+    } catch {
+      // clipboard blocked: nothing else to do
+    }
   }
 }
 
 function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
+  const [aiOpen, setAiOpen] = useState(false);
   const [aiLang, setAiLang] = useState<Lang>('fo');
   const [aiAction, setAiAction] = useState<AiAction>('translateToEn');
   const [instruction, setInstruction] = useState('');
@@ -55,6 +52,7 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [copied, setCopied] = useState<Lang | null>(null);
 
+  const plain = block.kind === 'meta';
   const changed = isChanged(block, edit);
   const needsLang = aiAction !== 'translateToEn' && aiAction !== 'translateToFo';
 
@@ -63,7 +61,7 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
     setError('');
     try {
       const text = await onAi(block, { action: aiAction, lang: aiLang, instruction });
-      setSuggestion({ lang: aiTargetLang(aiAction, aiLang), text });
+      setSuggestion({ lang: aiTargetLang(aiAction, aiLang), html: sanitizeRichHtml(aiResultToHtml(text), { plain }) });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -72,24 +70,24 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
   };
 
   const field = (lang: Lang) => {
-    const value = htmlToEditable(currentText(block, edit, lang));
+    const value = currentText(block, edit, lang);
     const langChanged = isChanged(block, edit, lang);
     const done = lang === 'fo' ? edit?.doneFo === true : edit?.doneEn === true;
     return (
-      <div className={`field${langChanged ? ' is-changed' : ''}`}>
-        <textarea
-          lang={lang}
-          aria-label={`${LANG_LABEL[lang]}: ${tagLabel(block)}`}
-          spellCheck={lang === 'en'}
-          rows={rowsFor(value)}
+      <div className="cell">
+        <RichField
           value={value}
-          onChange={(e) => onPatch(block, { [lang]: editableToHtml(e.target.value) })}
+          lang={lang}
+          plain={plain}
+          label={`${LANG_LABEL[lang]}: ${tagLabel(block)}`}
+          changed={langChanged}
+          onChange={(html) => onPatch(block, { [lang]: html })}
         />
         {langChanged && (
           <div className="field-foot">
             <details>
               <summary>Original</summary>
-              <p className="original" lang={lang}>{htmlToEditable(block[lang])}</p>
+              <div className="original" lang={lang} dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(block[lang], { plain }) }} />
             </details>
             <span className="field-actions">
               <button type="button" className="link" onClick={() => onPatch(block, { [lang]: block[lang] })}>
@@ -99,12 +97,12 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
                 type="button"
                 className="link"
                 onClick={() => {
-                  void copy(value);
+                  void copyRich(value);
                   setCopied(lang);
                   setTimeout(() => setCopied(null), 1200);
                 }}
               >
-                {copied === lang ? 'Copied' : 'Copy new'}
+                {copied === lang ? 'Copied' : 'Copy'}
               </button>
               <label className="check">
                 <input
@@ -130,16 +128,23 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
             {edit.updatedBy}, {new Date(edit.updatedAt).toLocaleString()}
           </span>
         )}
-        <label className="check approve">
-          <input type="checkbox" checked={edit?.approved === true} onChange={(e) => onPatch(block, { approved: e.target.checked })} />
-          Approved
-        </label>
+        <span className="block-tools">
+          {aiEnabled && (
+            <button type="button" className={`link${aiOpen ? ' is-on' : ''}`} onClick={() => setAiOpen(!aiOpen)}>
+              AI
+            </button>
+          )}
+          <label className="check">
+            <input type="checkbox" checked={edit?.approved === true} onChange={(e) => onPatch(block, { approved: e.target.checked })} />
+            Approved
+          </label>
+        </span>
       </header>
       <div className="fields">
         {field('fo')}
         {field('en')}
       </div>
-      {aiEnabled && (
+      {aiEnabled && aiOpen && (
         <div className="ai">
           <select aria-label="AI action" value={aiAction} onChange={(e) => setAiAction(e.target.value as AiAction)}>
             {AI_ACTIONS.map((a) => (
@@ -170,13 +175,13 @@ function BlockRowInner({ block, edit, aiEnabled, onPatch, onAi }: Props) {
       {suggestion && (
         <div className="suggestion">
           <span className="suggestion-label">AI suggestion, {LANG_LABEL[suggestion.lang]}</span>
-          <p lang={suggestion.lang}>{htmlToEditable(suggestion.text)}</p>
+          <div className="suggestion-text" lang={suggestion.lang} dangerouslySetInnerHTML={{ __html: suggestion.html }} />
           <div className="suggestion-actions">
             <button
               type="button"
               className="primary"
               onClick={() => {
-                onPatch(block, { [suggestion.lang]: editableToHtml(htmlToEditable(suggestion.text)) });
+                onPatch(block, { [suggestion.lang]: suggestion.html });
                 setSuggestion(null);
               }}
             >

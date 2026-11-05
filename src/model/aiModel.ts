@@ -1,6 +1,7 @@
 // Pure logic for the AI helper: which actions exist, how the request is built, how the reply is read.
 
 import type { Lang } from './contentModel';
+import { textToRichHtml } from './richTextModel';
 
 export type AiAction = 'translateToEn' | 'translateToFo' | 'proofread' | 'shorten' | 'custom';
 
@@ -82,6 +83,11 @@ export function buildAiRequest(input: AiInput): AiRequestBody {
     system: AI_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: buildAiPrompt(input) }],
   };
+}
+
+/** AI text as stored format: line breaks become <br> and only safe formatting is kept. */
+export function aiResultToHtml(text: string): string {
+  return textToRichHtml(text);
 }
 
 /** Read the text out of an Anthropic Messages API response. */

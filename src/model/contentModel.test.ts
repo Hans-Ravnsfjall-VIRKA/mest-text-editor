@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyEdit,
+  editorBlocks,
+  editorPages,
   currentText,
-  editableToHtml,
   editKey,
   filterBlocks,
-  htmlToEditable,
   isChanged,
   listPages,
+  matchCounts,
   needsReplace,
   pageProgress,
   siteProgress,
@@ -28,11 +29,13 @@ const page: PageDoc = {
     { id: 'a', kind: 'text', tag: 'h1', fo: 'Samband', en: 'Contact' },
     { id: 'b', kind: 'text', tag: 'p', fo: 'Ring til okkara', en: 'Call us' },
     { id: 'c', kind: 'text', tag: 'p', fo: 'sales@mest.fo', en: 'sales@mest.fo' },
+    { id: 'alt', kind: 'attr', tag: 'img', fo: 'Skip', en: 'Skip' },
   ],
 };
-const post: PageDoc = { ...page, id: 'tidindi-1', type: 'post', title: 'Ábending', inMenu: false };
+const post: PageDoc = { ...page, id: 'tidindi-1', type: 'post', title: 'Ábending', inMenu: false, date: '2026-07-01T00:00:00' };
+const staff: PageDoc = { ...page, id: 'kristian', type: 'wpm_team', title: 'Kristian' };
 const global: PageDoc = { ...page, id: '_global', type: 'global', title: 'Header', blocks: [page.blocks[0]] };
-const content: SiteContent = { site: 'https://x.fo', scrapedAt: '', pages: [post, page, global] };
+const content: SiteContent = { site: 'https://x.fo', scrapedAt: '', menu: [], pages: [post, page, global, staff] };
 
 const T1 = '2026-11-05T10:00:00.000Z';
 const T2 = '2026-11-05T11:00:00.000Z';
@@ -76,18 +79,6 @@ describe('applyEdit', () => {
   });
 });
 
-describe('editable text', () => {
-  it('round-trips line breaks and ampersands', () => {
-    const html = 'Søla &amp; Eykalutir<br>Lína 2 <strong>feitt</strong>';
-    const text = htmlToEditable(html);
-    expect(text).toBe('Søla & Eykalutir\nLína 2 <strong>feitt</strong>');
-    expect(editableToHtml(text)).toBe(html);
-  });
-  it('does not double-escape entities', () => {
-    expect(editableToHtml('a &lt; b & c')).toBe('a &lt; b &amp; c');
-  });
-});
-
 describe('filtering and progress', () => {
   const edits = edit({ fo: 'Ring til okkum', approved: true });
 
@@ -99,6 +90,11 @@ describe('filtering and progress', () => {
     expect(filterBlocks(page, edits, 'sameBoth', '').map((b) => b.id)).toEqual(['c']);
   });
 
+  it('searches through formatting', () => {
+    const marked = { ...page, blocks: [{ id: 'm', kind: 'text' as const, tag: 'p', fo: '<strong>Opið</strong> hvønn dag', en: 'Open' }] };
+    expect(filterBlocks(marked, {}, 'all', 'opið hvønn')).toHaveLength(1);
+  });
+
   it('searches original and edited text in both languages', () => {
     expect(filterBlocks(page, edits, 'all', 'okkum').map((b) => b.id)).toEqual(['b']);
     expect(filterBlocks(page, edits, 'all', 'OKKARA').map((b) => b.id)).toEqual(['b']);
@@ -108,15 +104,26 @@ describe('filtering and progress', () => {
 
   it('counts progress', () => {
     expect(pageProgress(page, edits)).toEqual({ total: 3, changed: 1, approved: 1, toReplace: 1 });
-    expect(siteProgress(content, edits).total).toBe(7);
     expect(siteProgress(content, edits).changed).toBe(1);
   });
 
-  it('lists pages: global first, menu pages next, filtered by group and matches', () => {
-    expect(listPages(content, edits, 'all', 'all', '').map((i) => i.page.id)).toEqual(['_global', 'samband', 'tidindi-1']);
-    expect(listPages(content, edits, 'post', 'all', '').map((i) => i.page.id)).toEqual(['_global', 'tidindi-1']);
-    expect(listPages(content, edits, 'menu', 'all', '').map((i) => i.page.id)).toEqual(['_global', 'samband']);
-    expect(listPages(content, edits, 'all', 'changed', '').map((i) => i.page.id)).toEqual(['samband']);
+  it('hides image alt texts', () => {
+    expect(editorBlocks(page).map((b) => b.id)).toEqual(['a', 'b', 'c']);
+    expect(filterBlocks(page, edits, 'all', 'skip')).toHaveLength(0);
+    expect(filterBlocks(page, edits, 'sameBoth', '').map((b) => b.id)).toEqual(['c']);
+  });
+
+  it('only edits pages and news', () => {
+    expect(editorPages(content).map((p) => p.id)).toEqual(['tidindi-1', 'samband']);
+    expect(siteProgress(content, edits).total).toBe(6);
+  });
+
+  it('lists pages and news in separate tabs, only those with matches when filtering', () => {
+    expect(listPages(content, edits, 'pages', 'changed', '').map((i) => i.page.id)).toEqual(['samband']);
+    expect(listPages(content, edits, 'pages', 'all', 'okkum').map((i) => i.matches)).toEqual([1]);
+    expect(listPages(content, edits, 'news', 'all', '').map((i) => i.page.id)).toEqual(['tidindi-1']);
+    expect(listPages(content, edits, 'news', 'changed', '')).toEqual([]);
+    expect(matchCounts(content, edits, 'changed', '').get('samband')).toBe(1);
   });
 
   it('labels blocks', () => {

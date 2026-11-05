@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  detectRepoFromLocation,
   editsEqual,
-  fromBase64Utf8,
   mergeEdits,
   parseEdits,
   serializeEdits,
-  toBase64Utf8,
 } from './syncModel';
 import type { Edits } from './contentModel';
 
@@ -42,17 +39,5 @@ describe('edits file', () => {
     expect(editsEqual({ a: older }, { a: { updatedBy: 'a', updatedAt: older.updatedAt, fo: 'gamalt' } })).toBe(true);
     expect(editsEqual({ a: older }, { a: newer })).toBe(false);
     expect(editsEqual({ a: older }, {})).toBe(false);
-  });
-});
-
-describe('helpers', () => {
-  it('encodes Faroese letters safely', () => {
-    const text = 'Tíðindi, Føroyar, ð á ú ý æ ø';
-    expect(fromBase64Utf8(toBase64Utf8(text))).toBe(text);
-  });
-  it('detects the repository on GitHub Pages only', () => {
-    expect(detectRepoFromLocation('virka.github.io', '/mest-text-editor/')).toEqual({ owner: 'virka', repo: 'mest-text-editor' });
-    expect(detectRepoFromLocation('localhost', '/')).toBeNull();
-    expect(detectRepoFromLocation('virka.github.io', '/')).toBeNull();
   });
 });
