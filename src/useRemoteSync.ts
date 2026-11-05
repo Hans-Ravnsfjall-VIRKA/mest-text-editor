@@ -29,6 +29,7 @@ const PULL_INTERVAL_MS = 30000;
 
 export function useRemoteSync({ client, edits, reviews, onMerged }: Options): {
   status: SyncStatus;
+  email: string | null;
   syncNow: () => void;
   signIn: (email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
@@ -123,5 +124,5 @@ export function useRemoteSync({ client, edits, reviews, onMerged }: Options): {
     if (client) await client.auth.signOut();
   }, [client]);
 
-  return { status, syncNow: () => void sync(), signIn, signOut };
+  return { status, email, syncNow: () => void sync(), signIn, signOut };
 }

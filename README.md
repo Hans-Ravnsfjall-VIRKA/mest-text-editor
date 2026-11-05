@@ -37,7 +37,7 @@ One-time setup:
 4. Put the project URL and the anon (public) key in `public/data/config.json` (Project Settings, API). The anon key is meant to be public: the tables only answer to signed-in users.
 5. Commit and push. Pages redeploys.
 
-Each person opens the app and signs in; nothing is shown before that. Changes are pushed a moment after each edit and pulled every 30 seconds. When two people change the same text or page, the newest change wins. Nothing is deleted: a revert or "not reviewed" is stored as a newer row.
+Each person opens the app and signs in; nothing is shown before that. "Sign out" is in the top bar, and the next sign-in returns that person to the view, page and filters they left on (remembered per account in the browser). Changes are pushed a moment after each edit and pulled every 30 seconds. When two people change the same text or page, the newest change wins. Nothing is deleted: a revert or "not reviewed" is stored as a newer row.
 
 Use Export, "Backup of all edits" and "Import edits" as a safety copy.
 

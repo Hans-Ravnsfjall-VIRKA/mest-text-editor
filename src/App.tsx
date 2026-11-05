@@ -23,6 +23,7 @@ import {
 } from './model/contentModel';
 import { breadcrumbFor, buildNewsNav, buildPagesNav, cleanTitle } from './model/navModel';
 import { buildDictionary, changeRows, toCsv } from './model/exportModel';
+import { DEFAULT_POSITION, type View } from './model/positionModel';
 import { parseSupabaseConfig } from './model/remoteModel';
 import {
   firstUnreviewed,
@@ -40,11 +41,9 @@ import {
 } from './model/reviewModel';
 import { mergeEdits, parseEdits, serializeEdits } from './model/syncModel';
 import { runAi } from './services/ai';
-import { downloadText, loadLocalEdits, loadLocalReviews, loadSettings, saveLocalEdits, saveLocalReviews, saveSettings, type Settings } from './services/storage';
+import { downloadText, loadLocalEdits, loadLocalReviews, loadPosition, loadSettings, saveLocalEdits, saveLocalReviews, savePosition, saveSettings, type Settings } from './services/storage';
 import { makeClient } from './services/supabase';
 import { useRemoteSync } from './useRemoteSync';
-
-type View = 'edit' | 'wizard' | 'overview';
 
 const VIEWS: { value: View; label: string }[] = [
   { value: 'edit', label: 'Edit' },
@@ -111,7 +110,29 @@ export function App() {
     setEdits((local) => mergeEdits(remoteEdits, local));
     setReviews((local) => mergeReviews(remoteReviews, local));
   }, []);
-  const { status, syncNow, signIn, signOut } = useRemoteSync({ client, edits, reviews, onMerged });
+  const { status, email, syncNow, signIn, signOut } = useRemoteSync({ client, edits, reviews, onMerged });
+
+  // Remember where each signed-in person was, and put them back there after the next sign-in.
+  const [restoredFor, setRestoredFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!email) {
+      setRestoredFor(null);
+      return;
+    }
+    if (restoredFor === email) return;
+    const pos = loadPosition(email) ?? DEFAULT_POSITION;
+    setView(pos.view);
+    setTab(pos.tab);
+    setSelectedId(pos.pageId);
+    setReviewFilter(pos.reviewFilter);
+    setChangesFilter(pos.changesFilter);
+    setOnlyUnreviewed(pos.onlyUnreviewed);
+    setRestoredFor(email);
+  }, [email, restoredFor]);
+  useEffect(() => {
+    if (!email || restoredFor !== email) return;
+    savePosition(email, { view, tab, pageId: selectedId, reviewFilter, changesFilter, onlyUnreviewed });
+  }, [email, restoredFor, view, tab, selectedId, reviewFilter, changesFilter, onlyUnreviewed]);
 
   const userRef = useRef(settings.userName);
   userRef.current = settings.userName;
@@ -311,6 +332,11 @@ export function App() {
         <button type="button" className={`sync sync-${status.state}`} title={status.message || status.email || ''} onClick={onSyncButton}>
           {syncLabel[status.state]}
         </button>
+        {email && (
+          <button type="button" title={`Signed in as ${email}`} onClick={() => void signOut()}>
+            Sign out
+          </button>
+        )}
         <button type="button" className={settings.userName ? '' : 'needs-name'} title={settings.userName ? '' : 'Add your name so others can see who changed what'} onClick={() => setShowSettings(true)}>
           {settings.userName ? 'Settings' : 'Add your name'}
         </button>

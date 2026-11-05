@@ -3,6 +3,7 @@
 
 import type { Edits } from '../model/contentModel';
 import { DEFAULT_AI_MODEL } from '../model/aiModel';
+import { parsePosition, positionKey, type Position } from '../model/positionModel';
 import { parseReviews, type Reviews } from '../model/reviewModel';
 import { parseEdits, serializeEdits } from '../model/syncModel';
 
@@ -66,6 +67,22 @@ export function loadLocalReviews(): Reviews {
 export function saveLocalReviews(reviews: Reviews): void {
   try {
     localStorage.setItem(REVIEWS_KEY, JSON.stringify(reviews));
+  } catch {
+    // storage unavailable or full
+  }
+}
+
+export function loadPosition(email: string): Position | null {
+  try {
+    return parsePosition(localStorage.getItem(positionKey(email)));
+  } catch {
+    return null;
+  }
+}
+
+export function savePosition(email: string, position: Position): void {
+  try {
+    localStorage.setItem(positionKey(email), JSON.stringify(position));
   } catch {
     // storage unavailable or full
   }
