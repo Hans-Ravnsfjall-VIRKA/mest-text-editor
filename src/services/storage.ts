@@ -3,6 +3,7 @@
 
 import type { Edits } from '../model/contentModel';
 import { DEFAULT_AI_MODEL } from '../model/aiModel';
+import { parseQueue, type LogEntry } from '../model/logModel';
 import { parsePosition, positionKey, type Position } from '../model/positionModel';
 import { parseReviews, type Reviews } from '../model/reviewModel';
 import { parseEdits, serializeEdits } from '../model/syncModel';
@@ -83,6 +84,24 @@ export function loadPosition(email: string): Position | null {
 export function savePosition(email: string, position: Position): void {
   try {
     localStorage.setItem(positionKey(email), JSON.stringify(position));
+  } catch {
+    // storage unavailable or full
+  }
+}
+
+const LOG_QUEUE_KEY = 'mest-text-editor:log-queue';
+
+export function loadLogQueue(): LogEntry[] {
+  try {
+    return parseQueue(localStorage.getItem(LOG_QUEUE_KEY));
+  } catch {
+    return [];
+  }
+}
+
+export function saveLogQueue(queue: LogEntry[]): void {
+  try {
+    localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify(queue));
   } catch {
     // storage unavailable or full
   }

@@ -3,6 +3,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Edits } from '../model/contentModel';
 import { chunk, editsToRows, reviewsToRows, rowsToEdits, rowsToReviews, type SupabaseConfig } from '../model/remoteModel';
+import { logToRows, rowsToLog, type LogEntry } from '../model/logModel';
 import type { Reviews } from '../model/reviewModel';
 
 const PAGE = 1000;
@@ -45,3 +46,21 @@ export async function pushReviews(client: SupabaseClient, reviews: Reviews): Pro
     if (error) throw new Error(error.message);
   }
 }
+
+const LOG_PAGE = 500;
+
+export async function pullLog(client: SupabaseClient, limit: number): Promise<LogEntry[]> {
+  const { data, error } = await client.from('change_log').select('*').order('at', { ascending: false }).limit(limit);
+  if (error) throw new Error(error.message);
+  return rowsToLog(data);
+}
+
+export async function pushLog(client: SupabaseClient, entries: LogEntry[]): Promise<void> {
+  for (const rows of chunk(logToRows(entries), BATCH)) {
+    // Ignore ids that already arrived: a retry must not create duplicates.
+    const { error } = await client.from('change_log').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+    if (error) throw new Error(error.message);
+  }
+}
+
+export const LOG_PAGE_SIZE = LOG_PAGE;

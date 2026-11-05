@@ -41,10 +41,15 @@ Each person opens the app and signs in; nothing is shown before that. "Sign out"
 
 Use Export, "Backup of all edits" and "Import edits" as a safety copy.
 
+## Change log
+
+Every text change, revert, approval, "In WordPress" tick and page review is logged with who did it (name from Settings, account email on hover) and when. Typing is merged: one editing burst is one entry, with the text before and after. The log lives in the `change_log` table, can be added to but not edited or deleted, and is shown in the **Log** view with filters for person, kind of change and text. Entries made before sign-in are kept in the browser and added once you sign in. If you updated from an earlier version, run `supabase/schema.sql` again (it is safe to repeat) to create the table.
+
 ## Views
 
 - **Edit**: the sidebar follows the site menu. The Not reviewed / Reviewed filter above it narrows the tree, and a tick marks reviewed pages.
 - **Wizard** (the start view): one page at a time with "Fyrru síðu" and "Næstu síðu", a progress bar (reviewed, left), and links to the Faroese and English originals. "Only not reviewed" keeps the round to what is left. Mark a page as reviewed on the page itself.
+- **Log**: who changed what and when, newest first.
 - **Overview**: every page or news item with its status. Filter on reviewed or not, and on "Open changes" (changed texts not yet ticked "In WordPress"). A reviewed page can be set back to not reviewed here or on the page.
 
 ## AI helper

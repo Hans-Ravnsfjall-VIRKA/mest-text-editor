@@ -58,3 +58,25 @@ revoke all on function public.upsert_text_edits(jsonb)   from public, anon;
 revoke all on function public.upsert_page_reviews(jsonb) from public, anon;
 grant execute on function public.upsert_text_edits(jsonb)   to authenticated;
 grant execute on function public.upsert_page_reviews(jsonb) to authenticated;
+
+-- Change log: who changed what and when. Append-only, nobody can edit or delete rows.
+create table if not exists public.change_log (
+  id         text primary key,
+  at         timestamptz not null,
+  by         text not null,
+  by_email   text not null default '',
+  page_id    text not null,
+  page_title text not null default '',
+  block_id   text not null default '',
+  kind       text not null check (kind in ('text', 'revert', 'approved', 'inWordPress', 'reviewed')),
+  lang       text check (lang in ('fo', 'en')),
+  from_text  text not null default '',
+  to_text    text not null default ''
+);
+create index if not exists change_log_at_idx on public.change_log (at desc);
+
+alter table public.change_log enable row level security;
+drop policy if exists "team read"   on public.change_log;
+drop policy if exists "team insert" on public.change_log;
+create policy "team read"   on public.change_log for select to authenticated using (true);
+create policy "team insert" on public.change_log for insert to authenticated with check (true);

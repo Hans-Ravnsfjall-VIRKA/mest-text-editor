@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiJob } from './components/BlockRow';
 import { LoginDialog } from './components/LoginDialog';
+import { LogView } from './components/LogView';
 import { Overview } from './components/Overview';
 import { PageView } from './components/PageView';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -21,6 +22,7 @@ import {
   type NavTab,
   type SiteContent,
 } from './model/contentModel';
+import { afterSend, entriesForPatch, mergeLog, queueEntry, reviewEntry, type LogEntry } from './model/logModel';
 import { breadcrumbFor, buildNewsNav, buildPagesNav, cleanTitle } from './model/navModel';
 import { buildDictionary, changeRows, toCsv } from './model/exportModel';
 import { DEFAULT_POSITION, type View } from './model/positionModel';
@@ -41,14 +43,16 @@ import {
 } from './model/reviewModel';
 import { mergeEdits, parseEdits, serializeEdits } from './model/syncModel';
 import { runAi } from './services/ai';
-import { downloadText, loadLocalEdits, loadLocalReviews, loadPosition, loadSettings, saveLocalEdits, saveLocalReviews, savePosition, saveSettings, type Settings } from './services/storage';
-import { makeClient } from './services/supabase';
+import { downloadText, loadLocalEdits, loadLocalReviews, loadLogQueue, loadPosition, loadSettings, saveLocalEdits, saveLocalReviews, saveLogQueue, savePosition, saveSettings, type Settings } from './services/storage';
+import { LOG_PAGE_SIZE, makeClient, pullLog } from './services/supabase';
+import { useChangeLog } from './useChangeLog';
 import { useRemoteSync } from './useRemoteSync';
 
 const VIEWS: { value: View; label: string }[] = [
   { value: 'edit', label: 'Edit' },
   { value: 'wizard', label: 'Wizard' },
   { value: 'overview', label: 'Overview' },
+  { value: 'log', label: 'Log' },
 ];
 
 const FILTERS: { value: BlockFilter; label: string }[] = [
@@ -58,6 +62,10 @@ const FILTERS: { value: BlockFilter; label: string }[] = [
   { value: 'toReplace', label: 'Not yet in WordPress' },
   { value: 'sameBoth', label: 'Same in both languages' },
 ];
+
+function newLogId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function App() {
   const [content, setContent] = useState<SiteContent | null>(null);
@@ -78,6 +86,11 @@ export function App() {
   const [changesFilter, setChangesFilter] = useState<ChangesFilter>('all');
   const [onlyUnreviewed, setOnlyUnreviewed] = useState(true);
   const [notice, setNotice] = useState('');
+  const [logQueue, setLogQueue] = useState<LogEntry[]>(() => loadLogQueue());
+  const [remoteLog, setRemoteLog] = useState<LogEntry[]>([]);
+  const [logLimit, setLogLimit] = useState(LOG_PAGE_SIZE);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState('');
   const importRef = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -105,6 +118,9 @@ export function App() {
   useEffect(() => {
     saveLocalReviews(reviews);
   }, [reviews]);
+  useEffect(() => {
+    saveLogQueue(logQueue);
+  }, [logQueue]);
 
   const onMerged = useCallback((remoteEdits: Edits, remoteReviews: Reviews) => {
     setEdits((local) => mergeEdits(remoteEdits, local));
@@ -134,7 +150,43 @@ export function App() {
     savePosition(email, { view, tab, pageId: selectedId, reviewFilter, changesFilter, onlyUnreviewed });
   }, [email, restoredFor, view, tab, selectedId, reviewFilter, changesFilter, onlyUnreviewed]);
 
+  useChangeLog({ client, signedIn: email !== null, queue: logQueue, onSent: (sent) => setLogQueue((q) => afterSend(q, sent)) });
+
+  // The log is read from the database while the Log view is open.
+  useEffect(() => {
+    if (view !== 'log' || !client || !email) return;
+    let cancelled = false;
+    const load = (): void => {
+      setLogLoading(true);
+      pullLog(client, logLimit)
+        .then((entries) => {
+          if (!cancelled) {
+            setRemoteLog(entries);
+            setLogError('');
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setLogError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          if (!cancelled) setLogLoading(false);
+        });
+    };
+    load();
+    const timer = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [view, client, email, logLimit]);
+
   const userRef = useRef(settings.userName);
+  const emailRef = useRef(email);
+  emailRef.current = email;
+  const reviewsRef = useRef(reviews);
+  reviewsRef.current = reviews;
+  const contentRef = useRef(content);
+  contentRef.current = content;
   userRef.current = settings.userName;
   const pageRef = useRef<string | null>(null);
 
@@ -179,15 +231,42 @@ export function App() {
     mainRef.current?.scrollTo({ top: 0 });
   }, [page?.id, view]);
 
-  const toggleReviewed = useCallback((id: string, value: boolean) => {
-    setReviews((current) => setReviewed(current, id, value, userRef.current || 'unknown', new Date().toISOString()));
+  const who = useCallback(() => {
+    const mail = emailRef.current ?? '';
+    return { by: userRef.current || mail || 'unknown', byEmail: mail, now: new Date().toISOString(), newId: newLogId };
   }, []);
+
+  const toggleReviewed = useCallback(
+    (id: string, value: boolean) => {
+      const w = who();
+      const entry = reviewEntry({
+        ...w,
+        pageId: id,
+        pageTitle: cleanTitle(contentRef.current?.pages.find((p) => p.id === id)?.title ?? id),
+        was: isReviewed(reviewsRef.current, id),
+        next: value,
+      });
+      if (entry) setLogQueue((q) => queueEntry(q, entry));
+      setReviews((current) => setReviewed(current, id, value, w.by, w.now));
+    },
+    [who],
+  );
 
   const onPatch = useCallback((block: Block, patch: EditPatch) => {
     const id = pageRef.current;
     if (!id) return;
-    setEdits((current) => applyEdit(current, block, editKey(id, block.id), patch, userRef.current || 'unknown', new Date().toISOString()));
-  }, []);
+    const w = who();
+    const entries = entriesForPatch({
+      ...w,
+      block,
+      pageId: id,
+      pageTitle: cleanTitle(pageDocRef.current?.title ?? id),
+      patch,
+      before: editsRef.current[editKey(id, block.id)],
+    });
+    if (entries.length > 0) setLogQueue((q) => entries.reduce(queueEntry, q));
+    setEdits((current) => applyEdit(current, block, editKey(id, block.id), patch, w.by, w.now));
+  }, [who]);
 
   const editsRef = useRef(edits);
   editsRef.current = edits;
@@ -300,7 +379,7 @@ export function App() {
             </button>
           ))}
         </div>
-        {view !== 'overview' && (
+        {(view === 'edit' || view === 'wizard') && (
           <>
             <input type="search" className="search" placeholder="Search all texts" aria-label="Search all texts" value={query} onChange={(e) => setQuery(e.target.value)} />
             <select aria-label="Filter texts" value={filter} onChange={(e) => setFilter(e.target.value as BlockFilter)}>
@@ -401,6 +480,22 @@ export function App() {
               openPages={openPages}
               onOpen={openPage}
               onToggleReviewed={toggleReviewed}
+            />
+          </main>
+        </div>
+      )}
+
+      {view === 'log' && (
+        <div className="layout is-single">
+          <main className="main" ref={mainRef}>
+            <LogView
+              entries={mergeLog(remoteLog, logQueue)}
+              loading={logLoading}
+              error={logError}
+              canLoadMore={remoteLog.length >= logLimit}
+              onLoadMore={() => setLogLimit((n) => n + LOG_PAGE_SIZE)}
+              onOpen={openPage}
+              signedIn={email !== null}
             />
           </main>
         </div>

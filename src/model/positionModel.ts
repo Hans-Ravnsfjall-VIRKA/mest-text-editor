@@ -3,7 +3,7 @@
 import type { NavTab } from './contentModel';
 import type { ChangesFilter, ReviewFilter } from './reviewModel';
 
-export type View = 'edit' | 'wizard' | 'overview';
+export type View = 'edit' | 'wizard' | 'overview' | 'log';
 
 export interface Position {
   view: View;
@@ -38,7 +38,7 @@ export function parsePosition(text: string | null): Position | null {
     const data = JSON.parse(text) as Partial<Record<keyof Position, unknown>>;
     if (typeof data !== 'object' || data === null) return null;
     return {
-      view: pick(data.view, ['edit', 'wizard', 'overview'], DEFAULT_POSITION.view),
+      view: pick(data.view, ['edit', 'wizard', 'overview', 'log'], DEFAULT_POSITION.view),
       tab: pick(data.tab, ['pages', 'news'], DEFAULT_POSITION.tab),
       pageId: typeof data.pageId === 'string' ? data.pageId : null,
       reviewFilter: pick(data.reviewFilter, ['all', 'unreviewed', 'reviewed'], DEFAULT_POSITION.reviewFilter),
