@@ -6,9 +6,11 @@ interface Props {
   onSignOut: () => Promise<void>;
   onSyncNow: () => void;
   onClose: () => void;
+  /** Sign-in gate: no way to dismiss. */
+  required?: boolean;
 }
 
-export function LoginDialog({ email, onSignIn, onSignOut, onSyncNow, onClose }: Props) {
+export function LoginDialog({ email, onSignIn, onSignOut, onSyncNow, onClose, required }: Props) {
   const [mail, setMail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -45,8 +47,8 @@ export function LoginDialog({ email, onSignIn, onSignOut, onSyncNow, onClose }: 
           });
         }}
       >
-        <h2 id="login-title">Sign in to save online</h2>
-        <p className="hint">Use the account you were given. Until you sign in, everything is saved in this browser only.</p>
+        <h2 id="login-title">{required ? 'MEST text editor' : 'Sign in to save online'}</h2>
+        <p className="hint">{required ? 'Sign in with the account you were given.' : 'Use the account you were given.'}</p>
         <label>
           Email
           <input type="email" value={mail} onChange={(e) => setMail(e.target.value)} autoComplete="username" required />
@@ -57,7 +59,7 @@ export function LoginDialog({ email, onSignIn, onSignOut, onSyncNow, onClose }: 
         </label>
         {error && <p className="notice is-error" role="alert">{error}</p>}
         <div className="dialog-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
+          {!required && <button type="button" onClick={onClose}>Cancel</button>}
           <button type="submit" className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         </div>
       </form>

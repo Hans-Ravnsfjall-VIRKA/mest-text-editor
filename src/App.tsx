@@ -67,6 +67,7 @@ export function App() {
   const [reviews, setReviews] = useState<Reviews>(() => loadLocalReviews());
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [client, setClient] = useState<SupabaseClient | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [view, setView] = useState<View>('wizard');
@@ -95,7 +96,8 @@ export function App() {
         const config = parseSupabaseConfig(text);
         if (config) setClient(makeClient(config));
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setConfigLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -224,7 +226,12 @@ export function App() {
   };
 
   if (loadError) return <p className="state">Could not load the site texts ({loadError}).</p>;
-  if (!content || !nav) return <p className="state">Loading texts…</p>;
+  if (!content || !nav || !configLoaded) return <p className="state">Loading texts…</p>;
+  // With a database set up, nothing is shown before signing in.
+  if (client && (status.state === 'idle' || status.state === 'off')) return <p className="state">Loading…</p>;
+  if (client && status.state === 'signedOut') {
+    return <LoginDialog email={null} required onSignIn={signIn} onSignOut={signOut} onSyncNow={syncNow} onClose={() => undefined} />;
+  }
 
   const syncLabel: Record<typeof status.state, string> = {
     off: 'Saved in this browser only',
